@@ -1,0 +1,303 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum LocationStatus {
+  UNVERIFIED
+  TRUSTED
+  FLAGGED
+}
+
+enum LocationCreator {
+  CUSTOMER
+  RIDER
+  SYSTEM
+}
+
+enum DeliveryStatus {
+  PENDING
+  DISPATCHED
+  IN_TRANSIT
+  DELIVERED
+  FAILED
+  RESCHEDULED
+}
+
+enum DeliveryFailureReason {
+  COULD_NOT_LOCATE_ADDRESS
+  CUSTOMER_UNREACHABLE
+  CUSTOMER_UNAVAILABLE
+  RESTRICTED_ACCESS_GATE
+  OTHER
+}
+
+model Merchant {
+  id            String            @id @default(cuid())
+  name          String
+  slug          String?           @unique
+  apiKey        String            @unique @map("api_key")
+  clientKey     String?           @unique @map("client_key")
+  webhookUrl    String?           @map("webhook_url")
+  rateLimitTier String            @default("standard") @map("rate_limit_tier")
+  profile       String?           @default("logistics")
+  techStack     String?           @map("tech_stack")
+  corridor      String?
+  deliveryTier  String?           @default("Pilot Tier - 1k to 10k") @map("delivery_tier")
+  createdAt     DateTime          @default(now()) @map("created_at")
+  updatedAt     DateTime          @updatedAt @map("updated_at")
+  locations     Location[]
+  deliveries    Delivery[]
+  zones         Zone[]
+  users         User[]
+  apiKeys       ApiKey[]
+  proofs        ProofOfDelivery[]
+  corrections   Correction[]
+  webhookLogs   WebhookLog[]
+  invoices      Invoice[]
+
+  @@map("merchants")
+}
+
+model User {
+  id           String    @id @default(cuid())
+  merchantId   String    @map("merchant_id")
+  merchant     Merchant  @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  name         String
+  email        String    @unique
+  passwordHash String    @map("password_hash")
+  role         String    @default("ADMIN")
+  deletedAt    DateTime? @map("deleted_at")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+
+  @@index([merchantId])
+  @@index([email])
+  @@map("users")
+}
+
+model ApiKey {
+  id              String   @id @default(cuid())
+  merchantId      String   @map("merchant_id")
+  merchant        Merchant @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  name            String
+  key             String   @unique
+  type            String   @default("SECRET") // "SECRET" | "PUBLIC"
+  rateLimitPerMin Int      @default(1000) @map("rate_limit_per_min")
+  isActive        Boolean  @default(true) @map("is_active")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  @@index([merchantId])
+  @@index([key])
+  @@map("api_keys")
+}
+
+model Location {
+  id              String                    @id @default(cuid())
+  merchantId      String                    @map("merchant_id")
+  merchant        Merchant                  @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  latitude        Float
+  longitude       Float
+  landmarkText    String                    @map("landmark_text")
+  gateDescription String?                   @map("gate_description")
+  unitPath        String?                   @map("unit_path")
+  photoUrl        String?                   @map("photo_url")
+  contactName     String?                   @map("contact_name")
+  contactPhone    String?                   @map("contact_phone")
+  confidenceScore Float                     @default(0.2) @map("confidence_score")
+  status          LocationStatus            @default(UNVERIFIED)
+  version         Int                       @default(1)
+  createdBy       LocationCreator           @default(CUSTOMER) @map("created_by")
+  geom            Unsupported("geography")?
+  createdAt       DateTime                  @default(now()) @map("created_at")
+  updatedAt       DateTime                  @updatedAt @map("updated_at")
+  versions        LocationVersion[]
+  deliveries      Delivery[]
+
+  @@index([merchantId])
+  @@index([latitude, longitude])
+  @@map("locations")
+}
+
+model LocationVersion {
+  id                 String   @id @default(cuid())
+  locationId         String   @map("location_id")
+  location           Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  versionNumber      Int      @map("version_number")
+  latitude           Float
+  longitude          Float
+  landmarkText       String   @map("landmark_text")
+  gateDescription    String?  @map("gate_description")
+  unitPath           String?  @map("unit_path")
+  photoUrl           String?  @map("photo_url")
+  submittedByRiderId String?  @map("submitted_by_rider_id")
+  changeSummary      String?  @map("change_summary")
+  createdAt          DateTime @default(now()) @map("created_at")
+
+  @@index([locationId])
+  @@map("location_versions")
+}
+
+model Delivery {
+  id                     String                 @id @default(cuid())
+  merchantId             String                 @map("merchant_id")
+  merchant               Merchant               @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  locationId             String?                @map("location_id")
+  location               Location?              @relation(fields: [locationId], references: [id], onDelete: SetNull)
+  trackingReference      String                 @map("tracking_reference")
+  recipientName          String?                @map("recipient_name")
+  recipientPhone         String?                @map("recipient_phone")
+  status                 DeliveryStatus         @default(PENDING)
+  isBaseline             Boolean                @default(false) @map("is_baseline")
+  callAttempts           Int                    @default(0) @map("call_attempts")
+  failureReason          DeliveryFailureReason? @map("failure_reason")
+  transitDurationMinutes Int?                   @map("transit_duration_minutes")
+  notes                  String?
+  dispatchedAt           DateTime?              @map("dispatched_at")
+  completedAt            DateTime?              @map("completed_at")
+  createdAt              DateTime               @default(now()) @map("created_at")
+  updatedAt              DateTime               @updatedAt @map("updated_at")
+  proofs                 ProofOfDelivery[]
+
+  @@index([merchantId])
+  @@index([isBaseline])
+  @@index([status])
+  @@map("deliveries")
+}
+
+model ProofOfDelivery {
+  id                String    @id @default(cuid())
+  merchantId        String    @map("merchant_id")
+  merchant          Merchant  @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  deliveryId        String?   @map("delivery_id")
+  delivery          Delivery? @relation(fields: [deliveryId], references: [id], onDelete: SetNull)
+  trackingReference String    @map("tracking_reference")
+  recipientName     String    @map("recipient_name")
+  landmarkText      String    @map("landmark_text")
+  gateDescription   String?   @map("gate_description")
+  latitude          Float
+  longitude         Float
+  geotag            String?
+  podPhotoUrl       String?   @map("pod_photo_url")
+  otpVerified       Boolean   @default(false) @map("otp_verified")
+  otpCode           String?   @map("otp_code")
+  callAttempts      Int       @default(0) @map("call_attempts")
+  riderName         String?   @map("rider_name")
+  riderVehicle      String?   @map("rider_vehicle")
+  verificationHash  String?   @map("verification_hash")
+  statusCategory    String    @default("TRUSTED") @map("status_category")
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
+
+  @@index([merchantId])
+  @@index([trackingReference])
+  @@map("proof_of_deliveries")
+}
+
+model Correction {
+  id              String   @id @default(cuid())
+  merchantId      String   @map("merchant_id")
+  merchant        Merchant @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  deliveryRef     String   @map("delivery_ref")
+  locationId      String?  @map("location_id")
+  landmarkText    String   @map("landmark_text")
+  originalGate    String?  @map("original_gate")
+  reportedGate    String   @map("reported_gate")
+  pinDriftMeters  Float    @default(0) @map("pin_drift_meters")
+  riderName       String   @map("rider_name")
+  riderConfidence Float    @default(80) @map("rider_confidence")
+  type            String   @default("GATE_CONFLICT") // GATE_CONFLICT | PIN_DRIFT_ALERT | CONFIRMATION
+  status          String   @default("PENDING_REVIEW") // PENDING_REVIEW | ACCEPTED | REJECTED
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  @@index([merchantId])
+  @@index([status])
+  @@map("corrections")
+}
+
+model WebhookLog {
+  id         String   @id @default(cuid())
+  merchantId String   @map("merchant_id")
+  merchant   Merchant @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  event      String
+  endpoint   String
+  statusCode Int      @map("status_code")
+  payload    String?
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  @@index([merchantId])
+  @@map("webhook_logs")
+}
+
+model Zone {
+  id              String   @id @default(cuid())
+  merchantId      String   @map("merchant_id")
+  merchant        Merchant @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  name            String
+  boundaryGeoJson String   @map("boundary_geojson") // GeoJSON Polygon coordinates string
+  isActive        Boolean  @default(true) @map("is_active")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  @@index([merchantId])
+  @@map("zones")
+}
+
+model PlatformPricing {
+  id                              String   @id @default(cuid())
+  baseLocationCaptureNgn          Float    @default(25.0) @map("base_location_capture_ngn")
+  baseRouteOptimizationStopNgn    Float    @default(40.0) @map("base_route_optimization_stop_ngn")
+  basePodVerificationNgn          Float    @default(15.0) @map("base_pod_verification_ngn")
+  starterMonthlyFeeNgn            Float    @default(35000) @map("starter_monthly_fee_ngn")
+  growthMonthlyFeeNgn             Float    @default(95000) @map("growth_monthly_fee_ngn")
+  enterpriseMonthlyFeeNgn         Float    @default(280000) @map("enterprise_monthly_fee_ngn")
+  bulkDiscountPercentOver10k      Float    @default(12) @map("bulk_discount_percent_over_10k")
+  bulkDiscountPercentOver50k      Float    @default(25) @map("bulk_discount_percent_over_50k")
+  freeTrialDays                   Int      @default(14) @map("free_trial_days")
+  autoSuspendNegativeBalanceHours Int      @default(48) @map("auto_suspend_negative_balance_hours")
+  updatedAt                       DateTime @updatedAt @map("updated_at")
+
+  @@map("platform_pricing")
+}
+
+model Invoice {
+  id             String    @id @default(cuid())
+  invoiceNumber  String    @unique @map("invoice_number")
+  merchantId     String    @map("merchant_id")
+  merchant       Merchant  @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  amountNgn      Float     @map("amount_ngn")
+  period         String
+  status         String    @default("PENDING") // PAID | PENDING | OVERDUE
+  paymentGateway String    @default("Paystack") @map("payment_gateway")
+  generatedAt    DateTime  @default(now()) @map("generated_at")
+  paidAt         DateTime? @map("paid_at")
+  itemBreakdown  String?   @map("item_breakdown") // JSON string: { locationCaptures, routeStops, podVerifications }
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+
+  @@index([merchantId])
+  @@index([status])
+  @@map("invoices")
+}
+
+model AdminAuditLog {
+  id           String   @id @default(cuid())
+  adminUser    String   @map("admin_user")
+  action       String
+  targetEntity String   @map("target_entity")
+  details      String
+  ipAddress    String?  @map("ip_address")
+  level        String   @default("INFO") // INFO | WARN | CRITICAL
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  @@index([action])
+  @@index([level])
+  @@map("admin_audit_logs")
+}

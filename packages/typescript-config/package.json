@@ -1,0 +1,8 @@
+{
+  "name": "@landmaka/typescript-config",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "files": ["base.json", "nextjs.json", "nestjs.json"],
+  "license": "UNLICENSED"
+}
